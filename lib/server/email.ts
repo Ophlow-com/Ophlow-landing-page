@@ -6,9 +6,8 @@ type Mail = { to: string | string[]; subject: string; html: string; text: string
 export const NOTIFY_TO = process.env.NOTIFY_TO || "ophlow@gmail.com";
 
 /**
- * Sends through Resend (https://resend.com). Without RESEND_API_KEY it reports `sent: false` and the page falls
- * back to a pre-filled email. Without a verified domain, Resend only delivers to the account's own address, so
- * sign up with the address in NOTIFY_TO.
+ * Sends through Resend (https://resend.com), from ophlow.com, which is verified there. Without RESEND_API_KEY it
+ * reports `sent: false`.
  */
 export async function sendEmail(mail: Mail): Promise<{ sent: boolean; error?: string }> {
   const key = process.env.RESEND_API_KEY;
@@ -17,7 +16,7 @@ export async function sendEmail(mail: Mail): Promise<{ sent: boolean; error?: st
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
-      from: process.env.EMAIL_FROM || "Ophlow <onboarding@resend.dev>",
+      from: process.env.EMAIL_FROM || "Ophlow <demos@ophlow.com>",
       to: mail.to,
       subject: mail.subject,
       html: mail.html,
@@ -50,7 +49,7 @@ export function rowsToHtml(title: string, groups: { heading?: string; rows: [str
           .map(
             ([k, v]) =>
               `<tr><td style="padding:6px 12px 6px 0;color:#5f564a;vertical-align:top;white-space:nowrap">${escapeHtml(k)}</td>` +
-              `<td style="padding:6px 0;color:#25211c;white-space:pre-wrap">${escapeHtml(v || "—")}</td></tr>`,
+              `<td style="padding:6px 0;color:#25211c;white-space:pre-wrap">${/^https:\/\/\S+$/.test(v) ? `<a href="${escapeHtml(v)}" style="color:#b85a36">${escapeHtml(v)}</a>` : escapeHtml(v || "—")}</td></tr>`,
           )
           .join("") +
         `</table>`,

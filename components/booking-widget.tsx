@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CalendarCheck, ChevronLeft, ChevronRight, Loader2, Mail, X } from "lucide-react";
+import { ArrowLeft, CalendarCheck, ChevronLeft, ChevronRight, Loader2, Mail, Video, X } from "lucide-react";
 import { track } from "@vercel/analytics";
 import { useEffect, useMemo, useState } from "react";
 import { BackLink } from "@/components/back-link";
@@ -38,7 +38,7 @@ export function BookingWidget() {
   const picked = useUrlFeatures();
   const [dropped, setDropped] = useState<string[]>([]);
   const features = picked.filter((id) => !dropped.includes(id));
-  const [done, setDone] = useState<{ kind: "sent" } | { kind: "fallback"; mailto: string } | null>(null);
+  const [done, setDone] = useState<{ kind: "sent"; told: boolean; joinUrl: string | null } | { kind: "fallback"; mailto: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [website, setWebsite] = useState("");
@@ -93,7 +93,7 @@ export function BookingWidget() {
       if (!res.ok) throw new Error(reply.error);
       if (reply.ok) {
         track("Demo booked");
-        return setDone({ kind: "sent" });
+        return setDone({ kind: "sent", told: Boolean(reply.confirmed), joinUrl: reply.joinUrl ?? null });
       }
       throw new Error();
     } catch (problem) {
@@ -115,17 +115,35 @@ export function BookingWidget() {
         </span>
         <h2 className="mt-5 text-3xl font-semibold text-forest-950">You&apos;re booked.</h2>
         <p className="mt-3 text-ink-700">{describe(slot.start, zone)}</p>
-        <p className="mt-4 leading-relaxed text-ink-600">We&apos;ve got it and will email {form.email} the video link before the call.</p>
+        <p className="mt-4 leading-relaxed text-ink-600">
+          {done.joinUrl
+            ? done.told
+              ? `The link to join is on its way to ${form.email}, and it's here too.`
+              : "Save this link. It's how you'll join the call."
+            : done.told
+              ? `The details are on their way to ${form.email}. We'll send the video link before the call.`
+              : `We've got it and will email ${form.email} the video link before the call.`}
+        </p>
+        {done.joinUrl ? (
+          <a href={done.joinUrl} target="_blank" rel="noreferrer" className="mt-6 inline-flex items-center gap-2 rounded-full bg-forest-800 px-6 py-3.5 text-sm font-semibold text-cream hover:bg-forest-900">
+            <Video className="h-4 w-4" /> Join link
+          </a>
+        ) : null}
         <a
           href={googleCalendarLink({
             start: slot.start,
             end: slot.end,
             summary: `${SITE.name} call`,
             details: `${AVAILABILITY.slotMinutes}-minute call with the ${SITE.name} team. Questions: ${SITE.email}`,
+            location: done.joinUrl ?? undefined,
           })}
           target="_blank"
           rel="noreferrer"
-          className="mt-6 inline-flex items-center gap-2 rounded-full bg-forest-800 px-6 py-3.5 text-sm font-semibold text-cream hover:bg-forest-900"
+          className={
+            done.joinUrl
+              ? "mt-4 block text-sm font-semibold text-rust-600 underline underline-offset-4"
+              : "mt-6 inline-flex items-center gap-2 rounded-full bg-forest-800 px-6 py-3.5 text-sm font-semibold text-cream hover:bg-forest-900"
+          }
         >
           <CalendarCheck className="h-4 w-4" /> Add to my Google Calendar
         </a>
