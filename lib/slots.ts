@@ -37,8 +37,13 @@ function todayIn(timeZone: string, now: number) {
 
 const overlaps = (aStart: number, aEnd: number, b: Interval) => aStart < Date.parse(b.end) && Date.parse(b.start) < aEnd;
 
-/** Every open demo slot from our hours, minus anything already on the team's calendars. */
+/** Every open demo slot from our hours, minus anything that overlaps `busy`. */
 export function openSlots(busy: Interval[], now = Date.now()): Interval[] {
+  return openSlotsWhere((slot) => busy.some((b) => overlaps(Date.parse(slot.start), Date.parse(slot.end), b)), now);
+}
+
+/** Every demo slot from our hours that `taken` doesn't rule out: the per-person rule in team-availability.ts. */
+export function openSlotsWhere(taken: (slot: Interval) => boolean, now = Date.now()): Interval[] {
   const { timeZone, hours, slotMinutes, minNoticeHours, daysAhead } = AVAILABILITY;
   const earliest = now + minNoticeHours * 3_600_000;
   const slotMs = slotMinutes * 60_000;
@@ -50,8 +55,9 @@ export function openSlots(busy: Interval[], now = Date.now()): Interval[] {
     for (const window of hours[day.getUTCDay()] ?? []) {
       const end = zonedToUtc(y, m, d, window.end, timeZone);
       for (let start = zonedToUtc(y, m, d, window.start, timeZone); start + slotMs <= end; start += slotMs) {
-        if (start < earliest || busy.some((b) => overlaps(start, start + slotMs, b))) continue;
-        slots.push({ start: new Date(start).toISOString(), end: new Date(start + slotMs).toISOString() });
+        const slot = { start: new Date(start).toISOString(), end: new Date(start + slotMs).toISOString() };
+        if (start < earliest || taken(slot)) continue;
+        slots.push(slot);
       }
     }
   }

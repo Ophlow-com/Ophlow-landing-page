@@ -1,16 +1,17 @@
 import { bookingRows, bookingSummary, validBooking, type Booking } from "@/lib/booking";
 import { icsEvent } from "@/lib/ics";
 import { NOTIFY_TO, rowsToHtml, rowsToText, sendEmail } from "@/lib/server/email";
-import { busyTimes, calendarConnected, createDemoEvent } from "@/lib/server/google-calendar";
+import { calendarConnected, createDemoEvent, teamFreeBusy } from "@/lib/server/google-calendar";
 import { LeadError, leadsConnected, saveBooking } from "@/lib/server/leads";
 import { createDemoMeeting } from "@/lib/server/zoom";
 import { SITE } from "@/lib/site";
-import { describe, openSlots } from "@/lib/slots";
+import { describe, openSlotsWhere } from "@/lib/slots";
+import { calendarsRead, checkSlot, eventAttendees, invitees, whoIsFree, type SlotCheck } from "@/lib/team-availability";
 
 /**
  * Books a call: re-checks the slot is still open, saves it (the database refuses a slot that's already taken), makes
- * a Zoom meeting, puts it on our calendar (GOOGLE_CREATE_EVENTS=true), then emails us and the visitor. Each of those
- * is optional and none can undo the booking. With no database connected it answers `fallback: true` and the page
+ * a Zoom meeting, puts it on our calendar (GOOGLE_CREATE_EVENTS=true) with the visitor and the team members free then
+ * as guests, then emails those team members and the visitor. Each of those is optional and none can undo the booking. With no database connected it answers `fallback: true` and the page
  * opens a pre-filled email instead.
  */
 export async function POST(request: Request) {
@@ -20,17 +21,27 @@ export async function POST(request: Request) {
   if (!validBooking(body)) return Response.json({ error: "Fill in your name, email and community, and pick a time." }, { status: 400 });
   const b = body;
 
-  let busy: Awaited<ReturnType<typeof busyTimes>> = [];
+  // Who's free right now, person by person (lib/team-availability.ts). Null when the calendar isn't connected.
+  let team: SlotCheck | null = null;
   if (calendarConnected()) {
+    let fb: Awaited<ReturnType<typeof teamFreeBusy>>;
     try {
-      busy = await busyTimes(new Date().toISOString(), new Date(Date.parse(b.end) + 60_000).toISOString());
+      fb = await teamFreeBusy(new Date().toISOString(), new Date(Date.parse(b.end) + 60_000).toISOString());
     } catch (error) {
       console.error("re-checking team calendars failed", error);
+      return Response.json({ error: `Couldn't read the team's calendars: ${error instanceof Error ? error.message : String(error)}` }, { status: 503 });
     }
+    if (calendarsRead(fb) === 0) {
+      return Response.json({ error: `Couldn't read any of the team's calendars: ${fb.errors.join("; ")}` }, { status: 503 });
+    }
+    team = checkSlot(fb, b);
   }
-  if (!openSlots(busy).some((s) => s.start === b.start && s.end === b.end)) {
+  const blocked = team?.blocked ?? false;
+  const open = openSlotsWhere(() => blocked);
+  if (!open.some((s) => s.start === b.start && s.end === b.end)) {
     return Response.json({ error: "That time isn't available any more. Please pick another." }, { status: 409 });
   }
+  const teamInvites = team ? invitees(team).map((m) => m.invite!) : [];
   if (!leadsConnected()) return Response.json({ ok: false, fallback: true });
 
   try {
@@ -65,30 +76,53 @@ export async function POST(request: Request) {
   let eventLink: string | null = null;
   let meetUrl: string | null = null;
   try {
-    const event = await createDemoEvent({ start: b.start, end: b.end, summary: bookingSummary(b), description: rowsToText("", [{ rows }]).trim(), joinUrl: zoomUrl });
+    // The visitor is a guest, so Google sends them the invite: the event holds only our own words, never what was
+    // typed into the form (anyone can enter anyone's email). The details go to the team by email below.
+    const event = await createDemoEvent({
+      start: b.start,
+      end: b.end,
+      summary: `${SITE.name} call`,
+      description: `Booked on ${SITE.name}. Questions: ${SITE.email}`,
+      joinUrl: zoomUrl,
+      attendees: team ? eventAttendees(b.email, team) : [],
+    });
     eventLink = event?.htmlLink ?? null;
     meetUrl = event?.hangoutLink ?? null;
   } catch (error) {
     console.error("creating the calendar event failed", error);
   }
   const joinUrl = zoomUrl ?? meetUrl;
+  // With a Google event, everyone on it already has it on their calendar: a calendar file too would be a second copy.
+  const invited = Boolean(eventLink && team);
 
   try {
     const title = `New call booked: ${b.community}`;
-    const groups = [{ rows: [...(meetUrl ? ([["Meet", meetUrl]] as [string, string][]) : []), ...rows, ...(eventLink ? ([["Calendar", eventLink]] as [string, string][]) : [])] }];
+    const groups = [
+      {
+        rows: [
+          ...(meetUrl ? ([["Meet", meetUrl]] as [string, string][]) : []),
+          ...rows,
+          ...(team ? ([["Team", whoIsFree(team)]] as [string, string][]) : []),
+          ...(eventLink ? ([["Calendar", eventLink]] as [string, string][]) : []),
+        ],
+      },
+    ];
     await sendEmail({
-      to: NOTIFY_TO,
+      // Only the team members free then; with no team set up (or nobody to invite), ophlow's own inbox as before.
+      to: teamInvites.length ? teamInvites : NOTIFY_TO,
       replyTo: b.email,
       subject: title,
       html: rowsToHtml(title, groups),
       text: rowsToText(title, groups),
-      attachments: [
-        {
-          filename: "call.ics",
-          content: icsEvent({ uid: `${crypto.randomUUID()}@ophlow`, start: b.start, end: b.end, summary: bookingSummary(b), description: rowsToText("", groups).trim(), organizer: NOTIFY_TO, attendee: b.email, location: joinUrl }),
-          contentType: "text/calendar",
-        },
-      ],
+      attachments: invited
+        ? []
+        : [
+            {
+              filename: "call.ics",
+              content: icsEvent({ uid: `${crypto.randomUUID()}@ophlow`, start: b.start, end: b.end, summary: bookingSummary(b), description: rowsToText("", groups).trim(), organizer: NOTIFY_TO, attendee: b.email, location: joinUrl }),
+              contentType: "text/calendar",
+            },
+          ],
     });
   } catch (error) {
     console.error("emailing the booking failed", error);
@@ -106,22 +140,24 @@ export async function POST(request: Request) {
       subject: title,
       html: rowsToHtml(title, groups),
       text: rowsToText(title, groups),
-      attachments: [
-        {
-          filename: "call.ics",
-          content: icsEvent({
-            uid: `${crypto.randomUUID()}@ophlow`,
-            start: b.start,
-            end: b.end,
-            summary: `${SITE.name} call`,
-            description: joinUrl ? `Join: ${joinUrl}` : "We'll email you the video link before the call.",
-            organizer: NOTIFY_TO,
-            attendee: b.email,
-            location: joinUrl,
-          }),
-          contentType: "text/calendar",
-        },
-      ],
+      attachments: invited
+        ? []
+        : [
+            {
+              filename: "call.ics",
+              content: icsEvent({
+                uid: `${crypto.randomUUID()}@ophlow`,
+                start: b.start,
+                end: b.end,
+                summary: `${SITE.name} call`,
+                description: joinUrl ? `Join: ${joinUrl}` : "We'll email you the video link before the call.",
+                organizer: NOTIFY_TO,
+                attendee: b.email,
+                location: joinUrl,
+              }),
+              contentType: "text/calendar",
+            },
+          ],
     });
     confirmed = mail.sent;
   } catch (error) {
