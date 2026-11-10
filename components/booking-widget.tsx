@@ -19,12 +19,17 @@ const input =
 
 export function BookingWidget() {
   const detected = useDetectedTimeZone();
-  // Our hours (lib/site.ts) minus demos already booked, from the server. If it can't be reached, just our hours.
+  // Our hours (lib/site.ts) minus demos already booked, from the server. If it can't be reached, just our hours. If it
+  // can't read any team calendar, no times and its reason.
   const [slots, setSlots] = useState<Interval[] | null>(null);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
   const loadSlots = () =>
     fetch("/api/availability", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((d: { slots: Interval[] }) => setSlots(d.slots))
+      .then((d: { slots: Interval[]; error?: string }) => {
+        setSlotsError(d.error ?? null);
+        setSlots(d.slots);
+      })
       .catch(() => setSlots(openSlots([])));
   useEffect(() => {
     void loadSlots();
@@ -248,6 +253,14 @@ export function BookingWidget() {
             {!slots ? (
               <p className="flex items-center gap-2 py-16 text-sm text-ink-500">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading open times…
+              </p>
+            ) : slots.length === 0 && slotsError ? (
+              <p className="rounded-2xl bg-rust-50 p-5 text-sm text-rust-700">
+                <span className="font-semibold">We can&apos;t show open times right now.</span> {slotsError.replace(/\.?$/, ".")} Email{" "}
+                <a className="font-semibold underline" href={`mailto:${SITE.email}?subject=Book%20a%20call`}>
+                  {SITE.email}
+                </a>{" "}
+                and we&apos;ll find a time.
               </p>
             ) : slots.length === 0 ? (
               <p className="rounded-2xl bg-cream p-5 text-sm text-ink-700">
