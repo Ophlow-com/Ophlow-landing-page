@@ -22,10 +22,10 @@ export const AVAILABILITY = {
   timeZone: "America/Denver",
   /** 0 = Sunday. Several windows a day are fine. */
   hours: {
-    1: [{ start: "09:00", end: "12:00" }, { start: "13:00", end: "17:00" }],
-    2: [{ start: "09:00", end: "12:00" }, { start: "13:00", end: "17:00" }],
-    3: [{ start: "09:00", end: "12:00" }, { start: "13:00", end: "17:00" }],
-    4: [{ start: "09:00", end: "12:00" }, { start: "13:00", end: "17:00" }],
+    1: [{ start: "09:00", end: "17:00" }],
+    2: [{ start: "09:00", end: "17:00" }],
+    3: [{ start: "09:00", end: "17:00" }],
+    4: [{ start: "09:00", end: "17:00" }],
     5: [{ start: "09:00", end: "12:00" }],
   } as Record<number, { start: string; end: string }[]>,
   slotMinutes: 15,
