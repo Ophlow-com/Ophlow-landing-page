@@ -26,7 +26,7 @@ export const AVAILABILITY = {
     2: [{ start: "09:00", end: "17:00" }],
     3: [{ start: "09:00", end: "17:00" }],
     4: [{ start: "09:00", end: "17:00" }],
-    5: [{ start: "09:00", end: "12:00" }],
+    5: [{ start: "09:00", end: "17:00" }],
   } as Record<number, { start: string; end: string }[]>,
   slotMinutes: 15,
   /** No booking sooner than this from now. */
